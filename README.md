@@ -1,5 +1,17 @@
-# 11-768 Assignment 1: Build an Agent Harness
+# CMU AI Agents coursework
 
-This repository contains the starter code and instructions for Assignment 1 for 11-768, the Carnegie Mellon University course on AI Agents. You can find the problem statement, along with instructions for setup and notes on grading in [ASSIGNMENT.md](ASSIGNMENT.md)
+Learning and assignments for [CMU 11-768: AI Agents](https://www.cmu-agents.com/).
 
-Authors: Weiwei Sun and Saujas Vaduguru, with feedback from 11-768 course staff (instructors Daniel Fried and Graham Neubig, and TAs Aditya Soni, Andy Liu, Apurva Gandhi, Demi Wang, Jiarui Liu, and Yueqi Song).
+## Assignment 1: Build an Agent Harness
+
+Starter code and instructions are in [`assignment-1/`](assignment-1/), sourced from [cmu-agents/assignment-1](https://github.com/cmu-agents/assignment-1). Original authorship and Git history are retained.
+
+Clone with dependencies:
+
+```bash
+git clone --recurse-submodules https://github.com/xiyuxie/cmu-agent.git
+cd cmu-agent/assignment-1
+make setup
+```
+
+Run assignment commands from `assignment-1/`. The chess application remains a pinned Git submodule.
