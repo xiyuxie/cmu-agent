@@ -16,6 +16,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from openai import OpenAI
+import yaml
 
 from assignment.env import Environment
 from assignment.agent.tools import INVOKE_SKILL_TOOL
@@ -168,7 +169,58 @@ class Agent:
         # ``content`` of the skill file for ``invoke_skill``. Reject duplicate
         # names and malformed or missing frontmatter with a clear
         # ``ValueError``.
-        raise NotImplementedError
+        if not skills_path.is_dir():
+            raise ValueError(f"skills_path {skills_path} is not a directory")
+
+        skills: dict[str, dict[str, str]] = {}
+        # Sorted so the catalog order is the same on every machine.
+        for skill_dir in sorted(p for p in skills_path.iterdir() if p.is_dir()):
+            skill_file = skill_dir / "SKILL.md"
+            if not skill_file.is_file():
+                continue  # a folder without SKILL.md is not a skill
+
+            content = skill_file.read_text(encoding="utf-8")
+
+            # Frontmatter is the block between the first two `---` lines.
+            lines = content.splitlines()
+            if not lines or lines[0].strip() != "---":
+                raise ValueError(f"{skill_file}: missing frontmatter (no opening ---)")
+            try:
+                end = next(
+                    i for i, line in enumerate(lines[1:], start=1) if line.strip() == "---"
+                )
+            except StopIteration:
+                raise ValueError(
+                    f"{skill_file}: malformed frontmatter (no closing ---)"
+                ) from None
+            try:
+                frontmatter = yaml.safe_load("\n".join(lines[1:end]))
+            except yaml.YAMLError as exc:
+                raise ValueError(
+                    f"{skill_file}: frontmatter is not valid YAML ({exc})"
+                ) from exc
+            if not isinstance(frontmatter, dict):
+                raise ValueError(
+                    f"{skill_file}: frontmatter must be `key: value` lines"
+                )
+
+            name = frontmatter.get("name")
+            description = frontmatter.get("description")
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(f"{skill_file}: frontmatter needs a `name`")
+            if not isinstance(description, str) or not description.strip():
+                raise ValueError(f"{skill_file}: frontmatter needs a `description`")
+            name = name.strip()
+            if name in skills:
+                raise ValueError(f"{skill_file}: duplicate skill name {name!r}")
+
+            # metadata goes in the prompt's catalog; content is returned only
+            # when the model calls invoke_skill.
+            skills[name] = {
+                "metadata": f"name: {name}\ndescription: {description.strip()}",
+                "content": content,
+            }
+        return skills
 
     def query_language_model(self) -> dict[str, Any]:
         """Send one tool-enabled Chat Completions request and normalize it."""
@@ -360,6 +412,12 @@ class Agent:
                 if tool_calls:
                     # One tool message per call; a subclass sets
                     # self.finished here when its task is complete.
+                    # Saving the results to self.history is what puts them
+                    # in front of the model: the next loop round rebuilds the
+                    # prompt from the history. The model keeps no memory
+                    # between calls, so the history is the agent's only
+                    # memory. Command output, error messages and skill text
+                    # all reach the model this same way.
                     self.history.extend(self.execute_tool_calls(tool_calls))
                 else:
                     # Text-only reply: keep it and nudge the model, so the
