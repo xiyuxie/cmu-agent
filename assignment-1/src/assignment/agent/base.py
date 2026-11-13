@@ -31,7 +31,31 @@ MAX_OBSERVATION_CHARS = 10_000
 # TODO(Part 2): Write instructions that make the model produce concise working
 # memory for a software agent. The prompt should preserve concrete progress,
 # failures, test results, constraints, and next steps without copying raw output.
-COMPACTION_SYSTEM_PROMPT = ""
+# Note on the name: this is the system prompt *for the compaction request*,
+# the separate model call that writes the summary. The agent's own system
+# prompt and task are never compacted; only self.history is.
+COMPACTION_SYSTEM_PROMPT = """You maintain the working memory of a software \
+engineering agent. The agent is partway through a task, and its transcript has \
+grown too long to keep. You will be given the task and the older part of the \
+transcript. Write the working memory that replaces that part. The agent will \
+continue from your notes alone, so anything you leave out is lost.
+
+Record, as short factual notes:
+- Objective: what the task asks for, and any constraints or rules to respect.
+- Files: paths that were read or edited, and what matters in each \
+(function names, line numbers, the behavior found).
+- Edits: every change made so far, specific enough to recognize or redo.
+- Commands and results: what was run and what it showed. Keep exact error \
+messages, failing test names, and key values. Never paste long output.
+- Failed approaches: what was tried and did not work, and why, so it is not \
+tried again.
+- Tests: what passes, what fails, and what has not been run yet.
+- Blockers and open questions.
+- Next action: the single most useful thing to do next.
+
+State only what the transcript shows. Do not guess, do not add advice, and do \
+not call tools. If an earlier working memory appears in the transcript, merge \
+it into the new one. Reply with the working memory only."""
 
 
 class StepLimitError(Exception):
@@ -56,6 +80,29 @@ def format_tool_output(output: dict[str, Any]) -> str:
             )
         elements.append(f"<{key}>{value}</{key}>")
     return "\n".join(elements)
+
+
+def render_transcript(messages: list[dict[str, Any]]) -> str:
+    """Write agent messages out as plain text for the compaction request."""
+
+    lines: list[str] = []
+    for message in messages:
+        role = message.get("role")
+        content = message.get("content") or ""
+        if role == "assistant":
+            if content:
+                lines.append(f"[assistant] {content}")
+            for call in message.get("tool_calls") or []:
+                function = call.get("function") or {}
+                lines.append(
+                    f"[assistant called {function.get('name')} "
+                    f"(id {call.get('id')})] {function.get('arguments')}"
+                )
+        elif role == "tool":
+            lines.append(f"[result of {message.get('tool_call_id')}]\n{content}")
+        else:
+            lines.append(f"[{role}] {content}")
+    return "\n\n".join(lines)
 
 
 def rough_message_tokens(messages: list[dict[str, Any]]) -> int:
@@ -326,9 +373,38 @@ class Agent:
         # with all linked tool observations. The resulting summary should change
         # what `build_prompt` emits, and reduce the length of the prompt.
 
-        raise NotImplementedError
+        # (A) Split the history into an old part to summarize and a recent
+        # part to keep. The cut always lands right before an assistant
+        # message, so every assistant action stays together with its tool
+        # results; a tool result without its call is rejected by the API.
+        assistant_positions = [
+            index
+            for index, message in enumerate(self.history)
+            if message.get("role") == "assistant"
+        ]
+        keep = self.compaction_keep_recent_steps
+        cut = assistant_positions[-keep] if len(assistant_positions) >= keep else 0
+        old_messages = self.history[:cut]
+        recent_messages = self.history[cut:]
 
-        compaction_prompt = []
+        # (B) Build the summary request. It is its own small conversation:
+        # the summarizer instructions, then the task (so the summarizer knows
+        # the goal) and the old steps written out as plain text. This call
+        # does not go through query_language_model(): it sends no tools, uses
+        # no step from the budget, and is not one of the agent's actions.
+        compaction_prompt = [
+            {"role": "system", "content": COMPACTION_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    f"<task>\n{self.task_prompt}\n</task>\n\n"
+                    "<transcript>\n"
+                    f"{render_transcript(old_messages)}\n"
+                    "</transcript>\n\n"
+                    "Write the working memory for the transcript above."
+                ),
+            },
+        ]
 
         ### Do not modify this section ###
         compaction_response = self.client.chat.completions.create(
@@ -341,6 +417,25 @@ class Agent:
 
         # Use `compaction_response` to update what `build_prompt` emits, but
         # DO NOT modify the object itself. Let the method return it unchanged.
+        # (C) Replace the old part of the history with the summary. The
+        # system prompt and task are not in self.history, so build_prompt()
+        # keeps sending them unchanged. api_prompts and api_responses are not
+        # touched: they still hold the full record of the run.
+        summary = (compaction_response.choices[0].message.content or "").strip()
+        if summary:
+            self.history = [
+                {
+                    "role": "user",
+                    "content": (
+                        "Your earlier steps were replaced by this working memory "
+                        "to save context. Continue the task from it.\n"
+                        f"<working_memory>\n{summary}\n</working_memory>"
+                    ),
+                },
+                *recent_messages,
+            ]
+        # An empty summary would erase the old steps and leave nothing in
+        # their place, so in that case the history is left as it was.
 
         ### Do not modify this section ###
         return compaction_prompt, compaction_response.model_dump(mode="json")
@@ -404,6 +499,11 @@ class Agent:
                     raise StepLimitError(
                         f"Agent did not finish within {self.step_limit} steps."
                     )
+
+                # TODO(2.2): when compaction is on and the prompt has grown
+                # past the threshold, this swaps the old steps in
+                # self.history for a short summary before the next request.
+                self.maybe_compact_context()
 
                 message = self.query_language_model()
                 self.history.append(message)
