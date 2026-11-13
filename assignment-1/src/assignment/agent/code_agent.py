@@ -51,7 +51,10 @@ class CodeAgent(Agent):
         # request. The model reads the list and replies either with tool calls
         # (the tool it picked and its arguments) or with text only. The tool
         # calls are then run by execute_tool_calls() below.
-        # Keep anything the base class already added (invoke_skill).
+        # When the agent is given skills (skills_path), Agent.__init__ has
+        # already appended INVOKE_SKILL_TOOL to self.tools before this line
+        # runs. `*self.tools` keeps that tool in the list instead of
+        # overwriting it.
         self.tools = [EXECUTE_TOOL, SEND_MESSAGE_TOOL, *self.tools]
 
         # TODO(1.1.b): Construct the system prompt and task_prompt. These
