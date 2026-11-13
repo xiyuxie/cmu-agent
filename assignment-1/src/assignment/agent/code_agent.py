@@ -105,6 +105,20 @@ class CodeAgent(Agent):
         )
         # TODO(1.4): If any skills are available to the agent, make their
         # descriptions/metadata available to the agent in the prompt.
+        # Progressive disclosure: the prompt lists only each skill's name and
+        # short description. The full instructions stay out of the prompt
+        # until the model asks for them with invoke_skill. With no skills,
+        # nothing is added.
+        if self.skills:
+            catalog = "\n\n".join(skill["metadata"] for skill in self.skills.values())
+            self.system_prompt += (
+                "\n\n"
+                "You have skills: short guides written ahead of time for one kind "
+                "of work. Only their names and descriptions are listed here. "
+                "Before doing work a skill covers, call `invoke_skill` with the "
+                "skill's name to read its full instructions, then follow them.\n"
+                f"<available_skills>\n{catalog}\n</available_skills>"
+            )
 
     def execute_tool_calls(
         self, tool_calls: list[dict[str, Any]]
@@ -141,10 +155,22 @@ class CodeAgent(Agent):
             elif name == "send_message":
                 self.finished = True
                 content = "Message sent."
+            elif name == "invoke_skill" and self.skills:
+                # Nothing runs in the sandbox: return the skill's full text
+                # so the model can read and follow it.
+                skill = self.skills.get(arguments.get("name"))
+                if skill is None:
+                    content = (
+                        f"<error>Unknown skill {arguments.get('name')!r}. "
+                        f"Available skills: {', '.join(self.skills)}.</error>"
+                    )
+                else:
+                    content = skill["content"]
             else:
+                available = ", ".join(tool["function"]["name"] for tool in self.tools)
                 content = (
                     f"<error>Unknown tool {name!r}. "
-                    "Use execute or send_message.</error>"
+                    f"Available tools: {available}.</error>"
                 )
 
             # 3. One tool message per call, linked to the call by its id.
