@@ -345,7 +345,35 @@ class Agent:
             # and handles the threshold, and tracks compaction events for
             # logging.
 
-            raise NotImplementedError
+            while not self.finished:
+                # query_language_model() counts steps; stop before paying for
+                # a call that would go over budget.
+                if self.steps_taken >= self.step_limit:
+                    raise StepLimitError(
+                        f"Agent did not finish within {self.step_limit} steps."
+                    )
+
+                message = self.query_language_model()
+                self.history.append(message)
+
+                tool_calls = message.get("tool_calls")
+                if tool_calls:
+                    # One tool message per call; a subclass sets
+                    # self.finished here when its task is complete.
+                    self.history.extend(self.execute_tool_calls(tool_calls))
+                else:
+                    # Text-only reply: keep it and nudge the model, so the
+                    # run recovers instead of crashing or stalling.
+                    self.history.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Your last response did not call a tool. "
+                                "Use one of your tools to continue working, "
+                                "or to signal that the task is complete."
+                            ),
+                        }
+                    )
         finally:
             # This block is provided infrastructure. Do not modify it: a
             # trajectory is required even when a run fails.
