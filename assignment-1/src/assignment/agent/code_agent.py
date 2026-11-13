@@ -46,6 +46,11 @@ class CodeAgent(Agent):
 
         # TODO(Part 1.3): Make the `execute` and `send_message` tools available
         # to the agent.
+        # self.tools is the list of tools the model may use.
+        # Agent.query_language_model() sends it to the model with every
+        # request. The model reads the list and replies either with tool calls
+        # (the tool it picked and its arguments) or with text only. The tool
+        # calls are then run by execute_tool_calls() below.
         # Keep anything the base class already added (invoke_skill).
         self.tools = [EXECUTE_TOOL, SEND_MESSAGE_TOOL, *self.tools]
 
