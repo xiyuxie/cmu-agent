@@ -59,6 +59,50 @@ class CodeAgent(Agent):
 
         # TODO(1.1.b): Construct the system prompt and task_prompt. These
         # should be usable by the `Agent.build_prompt` method.
+        # The four values describe the sandbox machine, not the machine this
+        # code runs on. The environment collected them when the sandbox started.
+        system_information = json.dumps(
+            {
+                "machine": self.env.machine,
+                "release": self.env.release,
+                "system": self.env.system,
+                "version": self.env.version,
+            },
+            indent=2,
+        )
+        # Standing instructions: sent as the `system` message on every request.
+        self.system_prompt = (
+            "You are a software engineer resolving an issue in a code repository. "
+            f"The repository is checked out at {self.env.cwd} on the machine "
+            "described below.\n"
+            "\n"
+            "You can only act through your tools. Use `execute` to run shell "
+            "commands: read the code, run it, edit files, and run tests. Make a "
+            "tool call in every response; a response without one does nothing.\n"
+            "\n"
+            "Work in this order:\n"
+            "1. Read the issue and explore the relevant code.\n"
+            "2. Reproduce the problem before changing anything, so you know "
+            "what failing looks like.\n"
+            "3. Make the smallest change to the source code that fixes the root "
+            "cause. Do not edit or delete existing tests to make them pass.\n"
+            "4. Verify the fix: run your reproduction again, then the existing "
+            "tests, and confirm nothing else broke.\n"
+            "\n"
+            "If a command fails or a tool returns an error, read the message and "
+            "try a different approach. When the issue is resolved and verified, "
+            "call `send_message` with a short summary of what you changed and "
+            "how you checked it. That ends your work, so call it only once you "
+            "are done.\n"
+            "\n"
+            f"<system_information>\n{system_information}\n</system_information>"
+        )
+        # The job itself: sent as the first `user` message.
+        self.task_prompt = (
+            f"Resolve the following issue in the repository at {self.env.cwd}.\n"
+            "\n"
+            f"<issue>\n{self.task}\n</issue>"
+        )
         # TODO(1.4): If any skills are available to the agent, make their
         # descriptions/metadata available to the agent in the prompt.
 
