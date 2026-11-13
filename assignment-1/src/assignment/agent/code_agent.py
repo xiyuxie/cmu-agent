@@ -156,8 +156,17 @@ class CodeAgent(Agent):
                 self.finished = True
                 content = "Message sent."
             elif name == "invoke_skill" and self.skills:
-                # Nothing runs in the sandbox: return the skill's full text
-                # so the model can read and follow it.
+                # A skill is written instructions, not code, so nothing runs
+                # in the sandbox here. This branch only returns the skill's
+                # full text. How the skill then gets carried out:
+                #   1. Agent.run() saves this text to self.history as a tool
+                #      result, like any other observation.
+                #   2. The next query_language_model() call sends the whole
+                #      history, so the model now sees the instructions.
+                #   3. The model follows them with ordinary tool calls, usually
+                #      one step per round (for submit-task: `execute` to write
+                #      patch.txt, `execute` to check it, then `send_message`).
+                # This code never needs to understand what a skill says.
                 skill = self.skills.get(arguments.get("name"))
                 if skill is None:
                     content = (

@@ -412,6 +412,12 @@ class Agent:
                 if tool_calls:
                     # One tool message per call; a subclass sets
                     # self.finished here when its task is complete.
+                    # Saving the results to self.history is what puts them
+                    # in front of the model: the next loop round rebuilds the
+                    # prompt from the history. The model keeps no memory
+                    # between calls, so the history is the agent's only
+                    # memory. Command output, error messages and skill text
+                    # all reach the model this same way.
                     self.history.extend(self.execute_tool_calls(tool_calls))
                 else:
                     # Text-only reply: keep it and nudge the model, so the
